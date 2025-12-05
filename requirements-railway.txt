@@ -1,0 +1,18 @@
+# Core FastAPI
+fastapi==0.114.2
+uvicorn==0.29.0
+starlette==0.37.2
+
+# ML
+torch==2.3.0+cpu
+torchvision==0.18.0+cpu
+numpy>=1.24.0,<2.0.0
+opencv-python-headless>=4.8.0
+
+# AWS S3
+boto3==1.40.68
+
+# Utility
+python-dotenv==1.0.1
+python-multipart==0.0.20
+requests==2.31.0

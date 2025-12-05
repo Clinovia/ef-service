@@ -1,0 +1,50 @@
+
+---
+
+# ✅ **`.gitignore`**
+
+```gitignore
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+
+# PyCharm / VSCode
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Model files
+*.pth
+*.pt
+
+# Logs
+*.log
+
+# Byte-compiled and temp files
+tmp/
+temp/
+*~
+*.swp
+
+# Local environment config
+.env.local
+.env.production
+.env.development
+
+# Docker
+docker-compose.override.yml
+
+# S3 downloaded model
+/tmp/ef_model.pth
