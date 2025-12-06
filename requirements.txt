@@ -4,8 +4,8 @@ uvicorn==0.29.0
 starlette==0.37.2
 
 # ML
-torch==2.3.0+cpu
-torchvision==0.18.0+cpu
+torch==2.3.0
+torchvision==0.18.0
 numpy>=1.24.0,<2.0.0
 opencv-python-headless>=4.8.0
 
