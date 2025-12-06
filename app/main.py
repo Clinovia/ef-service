@@ -31,6 +31,15 @@ app.add_middleware(
 async def startup_event():
     """Load EF model at startup."""
     print(f"🚀 Starting {settings.SERVICE_NAME}")
+    
+    # Check FFmpeg availability
+    from app.preprocessing import check_ffmpeg_installed
+    if not check_ffmpeg_installed():
+        print("⚠️  Warning: FFmpeg not found. Video format conversion will fail.")
+        print("   Install FFmpeg: https://ffmpeg.org/download.html")
+    else:
+        print("✅ FFmpeg is available")
+    
     try:
         initialize_model()
         print("✅ EF model loaded — service ready")
@@ -78,108 +87,51 @@ def health_check():
         "device": str(settings.DEVICE)
     }
 
-
 @app.post("/predict-ef")
 async def predict_ef_endpoint(video: UploadFile = File(...)):
     """
     Upload an echocardiogram video and return EF prediction.
-    
-    Args:
-        video: Video file (.avi, .mp4, .mov)
-        
-    Returns:
-        dict: Prediction results with EF value, severity, and metadata
-        
-    Raises:
-        HTTPException: If validation fails or prediction errors occur
+    Schema fields returned:
+        - ef_percent
+        - category
+        - confidence
+        - model_name
+        - model_version
     """
-    # Check if model is ready
     if not is_model_loaded():
         raise HTTPException(
             status_code=503,
             detail="Service is starting. Model not ready yet."
         )
-    
-    # Validate file size
-    if video.size and video.size > settings.MAX_VIDEO_SIZE_MB * 1024 * 1024:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Video exceeds {settings.MAX_VIDEO_SIZE_MB}MB limit. "
-                   f"Uploaded file is {video.size / (1024 * 1024):.2f}MB"
-        )
-    
-    # Validate mime type
+
     allowed_types = [
-        "video/x-msvideo",  # .avi
+        "video/x-msvideo",
         "video/avi",
         "video/mp4",
-        "video/quicktime",  # .mov
-        "video/x-matroska"  # .mkv (optional)
+        "video/quicktime",
+        "video/x-matroska"
     ]
-    
+
     if video.content_type and video.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type: {video.content_type}. "
                    f"Allowed formats: .avi, .mp4, .mov"
         )
-    
+
     try:
-        # Run inference pipeline
         result = await run_inference(video)
         return result
-        
+
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
-        
+
     except ValueError as e:
-        # Validation errors
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     except Exception as e:
-        # Unexpected errors
         print(f"❌ Prediction error: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Prediction failed: {str(e)}"
         )
-
-
-# -----------------------------
-# Additional Utility Endpoints
-# -----------------------------
-@app.get("/model-info")
-def model_info():
-    """
-    Get information about the loaded model.
-    """
-    if not is_model_loaded():
-        raise HTTPException(
-            status_code=503,
-            detail="Model not loaded yet"
-        )
-    
-    return {
-        "model_key": settings.EF_MODEL_KEY,
-        "model_path": settings.LOCAL_MODEL_PATH,
-        "device": str(settings.DEVICE),
-        "input_size": {
-            "frames": settings.DEFAULT_MAX_FRAMES,
-            "height": settings.DEFAULT_TARGET_SIZE[0],
-            "width": settings.DEFAULT_TARGET_SIZE[1]
-        },
-        "thresholds": settings.EF_THRESHOLDS
-    }
-
-
-@app.get("/version")
-def version():
-    """
-    Get service version information.
-    """
-    return {
-        "service": settings.SERVICE_NAME,
-        "version": "1.0.0",
-        "model_version": settings.EF_MODEL_KEY.split('/')[-1] if settings.EF_MODEL_KEY else "unknown"
-    }

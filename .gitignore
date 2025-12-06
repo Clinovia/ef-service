@@ -42,6 +42,7 @@ temp/
 .env.local
 .env.production
 .env.development
+.env.examples
 
 # Docker
 docker-compose.override.yml
