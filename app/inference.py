@@ -27,7 +27,7 @@ def is_model_loaded() -> bool:
 
 def initialize_model() -> None:
     """
-    Load the EF model from local or S3, place it on the configured device,
+    Load the EF model from local path, place it on the configured device,
     and set it to eval mode.
     """
     global _model, _model_initialized
@@ -37,14 +37,11 @@ def initialize_model() -> None:
         return
 
     try:
-        print(f"🚀 Initializing EF Model: {settings.EF_MODEL_KEY}")
-        model = load_ef_model(settings.EF_MODEL_KEY)
+        print(f"🚀 Initializing EF Model: {settings.LOCAL_MODEL_PATH}")
+        model = load_ef_model(settings.LOCAL_MODEL_PATH, device=str(settings.DEVICE))
 
         if model is None:
             raise RuntimeError("load_ef_model() returned None")
-
-        model.to(settings.DEVICE)
-        model.eval()
 
         _model = model
         _model_initialized = True
@@ -116,15 +113,13 @@ def predict_ef(video_tensor: torch.Tensor) -> Dict[str, Any]:
         else:
             ef_val = output[0][0].item()
 
-        # Clamp into physiologic range
         ef_val = float(max(0.0, min(100.0, ef_val)))
         ef_val_rounded = round(ef_val, 2)
 
         return {
-            # SCHEMA FIELDS (NEW)
             "ef_percent": ef_val_rounded,
             "category": settings.get_ef_severity(ef_val),
-            "confidence": None,  # update later if model supports it
+            "confidence": None,
         }
 
     except Exception as e:
@@ -165,19 +160,15 @@ async def run_inference(file: UploadFile) -> Dict[str, Any]:
                 )
             )
 
-        # Preprocess
         video_tensor = preprocess_video(file_bytes, file.filename)
-
-        # Predict
         base = predict_ef(video_tensor)
 
-        # Return SCHEMA MAPPING
         return {
             **base,
             "filename": file.filename,
             "file_size_mb": round(size_mb, 2),
-            "model_name": "echonet_3dcnn",       # NEW
-            "model_version": "1.0.0",            # NEW
+            "model_name": "echonet_3dcnn",
+            "model_version": "1.0.0",
         }
 
     except HTTPException:
