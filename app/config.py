@@ -1,78 +1,63 @@
+# app/config.py
 import os
 import torch
 from pathlib import Path
+from typing import Tuple, Dict
+from dotenv import load_dotenv
 
 # -----------------------------
-# Load environment variables
+# Load .env automatically
 # -----------------------------
-try:
-    from dotenv import load_dotenv
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    print(f"✅ Loaded environment variables from {env_path}")
+else:
+    print("ℹ️  No .env file found; using system environment variables")
 
-    env_path = Path(__file__).parent.parent / '.env'
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-        print(f"✅ Loaded environment variables from {env_path}")
-    else:
-        print("ℹ️  No .env file found; using system environment variables")
-
-except ImportError:
-    print("ℹ️  python-dotenv not installed; using system environment variables")
-
-
+# -----------------------------
+# Settings Class
+# -----------------------------
 class Settings:
-    # -----------------------------
-    # FastAPI Service Config
-    # -----------------------------
-    SERVICE_NAME = "Clinovia EF Microservice"
-    PORT = int(os.environ.get("PORT", 8081))
+    # Service
+    SERVICE_NAME: str = "Clinovia EF Microservice"
+    PORT: int = int(os.environ.get("PORT") or 8081)
 
-    # -----------------------------
-    # AWS S3 (Model Storage)
-    # -----------------------------
-    AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+    # AWS S3
+    AWS_ACCESS_KEY_ID: str = os.environ.get("AWS_ACCESS_KEY_ID") or ""
+    AWS_SECRET_ACCESS_KEY: str = os.environ.get("AWS_SECRET_ACCESS_KEY") or ""
+    AWS_REGION: str = os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+    S3_BUCKET: str = os.environ.get("CLINOVIA_S3_BUCKET") or "clinovia.ai"
 
-    S3_BUCKET = os.environ.get("CLINOVIA_S3_BUCKET", "clinovia.ai")
+    # Backend + EF Service
+    BACKEND_URL: str = os.environ.get("BACKEND_URL") or "http://localhost:8000"
+    EF_SERVICE_TOKEN: str = os.environ.get("EF_SERVICE_TOKEN") or ""
 
-    EF_MODEL_KEY = os.environ.get(
-        "EF_MODEL_KEY",
-        "models/cardiology/ejection-fraction/v1/ef3dcnn_epoch17.pth"
-    )
+    # Model
+    LOCAL_MODEL_PATH: str = os.environ.get(
+        "EF_LOCAL_MODEL_PATH"
+    ) or "/tmp/ef_model.pth"
 
-    LOCAL_MODEL_PATH = os.environ.get(
-        "LOCAL_MODEL_PATH",
-        "/tmp/ef_model.pth"
-    )
+    # PyTorch device
+    DEVICE: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # -----------------------------
-    # PyTorch Device
-    # -----------------------------
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Video preprocessing
+    DEFAULT_TARGET_SIZE: Tuple[int, int] = (112, 112)
+    DEFAULT_MAX_FRAMES: int = 32
+    MAX_VIDEO_SIZE_MB: int = int(os.environ.get("MAX_VIDEO_SIZE_MB") or 100)
 
-    # -----------------------------
-    # Video Preprocessing Settings
-    # -----------------------------
-    # ✔ MUST match your EchoNet training input
-    DEFAULT_TARGET_SIZE = (112, 112)   # (H, W)
-    DEFAULT_MAX_FRAMES = 32            # number of frames your model expects
-    MAX_VIDEO_SIZE_MB = int(os.environ.get("MAX_VIDEO_SIZE_MB", "100"))
-
-    # -----------------------------
-    # EF Severity Thresholds
-    # -----------------------------
-    EF_THRESHOLDS = {
-        "normal": 50,     # >= 50%
-        "mild": 40,       # 40–49%
-        "moderate": 30    # 30–39%
-        # <30 → severe
+    # EF thresholds
+    EF_THRESHOLDS: Dict[str, int] = {
+        "normal": 50,
+        "mild": 40,
+        "moderate": 30
     }
 
+    # -----------------------------
+    # EF Severity Helper
+    # -----------------------------
     @staticmethod
     def get_ef_severity(ef_value: float) -> str:
-        """
-        Assign EF severity class.
-        """
         if ef_value >= Settings.EF_THRESHOLDS["normal"]:
             return "normal"
         elif ef_value >= Settings.EF_THRESHOLDS["mild"]:
@@ -83,72 +68,45 @@ class Settings:
             return "severe_dysfunction"
 
     # -----------------------------
-    # Validation Helpers
+    # Validation
     # -----------------------------
     @classmethod
-    def validate(cls):
-        """Validate that required environment variables exist."""
+    def validate(cls) -> bool:
         errors = []
-
-        if not cls.S3_BUCKET:
-            errors.append("CLINOVIA_S3_BUCKET environment variable is required")
-
-        if not cls.AWS_ACCESS_KEY_ID:
-            errors.append("AWS_ACCESS_KEY_ID environment variable is required")
-
-        if not cls.AWS_SECRET_ACCESS_KEY:
-            errors.append("AWS_SECRET_ACCESS_KEY environment variable is required")
-
+        if not cls.LOCAL_MODEL_PATH:
+            errors.append("EF_LOCAL_MODEL_PATH not set")
+        if not cls.AWS_ACCESS_KEY_ID or not cls.AWS_SECRET_ACCESS_KEY:
+            errors.append("AWS credentials missing")
         if errors:
-            error_msg = "\n".join([f"  ❌ {e}" for e in errors])
-            raise ValueError(f"Configuration errors:\n{error_msg}")
-
+            raise ValueError("Configuration errors:\n" + "\n".join(errors))
         return True
 
+    # -----------------------------
+    # Print Config
+    # -----------------------------
     @classmethod
-    def print_config(cls):
-        """Print a summary of current configuration with masked secrets."""
-        print("\n" + "=" * 50)
-        print("Configuration Summary")
-        print("=" * 50)
-        print(f"Service Name: {cls.SERVICE_NAME}")
+    def print_config(cls) -> None:
+        masked_aws_key = (
+            cls.AWS_ACCESS_KEY_ID[:4] + "*" * 12 + cls.AWS_ACCESS_KEY_ID[-4:]
+            if cls.AWS_ACCESS_KEY_ID else "❌ NOT SET"
+        )
+        print("\n" + "="*50)
+        print(f"Service: {cls.SERVICE_NAME}")
         print(f"Port: {cls.PORT}")
         print(f"Device: {cls.DEVICE}")
+        print(f"Local model path: {cls.LOCAL_MODEL_PATH}")
         print(f"S3 Bucket: {cls.S3_BUCKET}")
-        print(f"Model Key: {cls.EF_MODEL_KEY}")
-        print(f"Local Model Path: {cls.LOCAL_MODEL_PATH}")
-
-        # Mask secret values
-        if cls.AWS_ACCESS_KEY_ID:
-            masked = cls.AWS_ACCESS_KEY_ID[:4] + "*" * 12 + cls.AWS_ACCESS_KEY_ID[-4:]
-            print(f"AWS Access Key: {masked}")
-        else:
-            print("AWS Access Key: ❌ NOT SET")
-
-        if cls.AWS_SECRET_ACCESS_KEY:
-            print("AWS Secret Key: " + "*" * 20)
-        else:
-            print("AWS Secret Key: ❌ NOT SET")
-
-        print(f"AWS Region: {cls.AWS_REGION}")
-        print("=" * 50 + "\n")
+        print(f"AWS Access Key: {masked_aws_key}")
+        print("="*50 + "\n")
 
 
 # -----------------------------
-# Create settings singleton
+# Singleton instance
 # -----------------------------
-settings = Settings()
-
-# Print config & validate
+settings: Settings = Settings()
 settings.print_config()
-
 try:
     settings.validate()
-    print("✅ Configuration validated successfully\n")
+    print("✅ Configuration validated")
 except ValueError as e:
-    print(f"\n⚠️  Configuration Warning:\n{e}\n")
-    print("💡 To fix:")
-    print("   Create .env and set your AWS credentials.")
-    print("   Server will still start for health checks.\n")
-
-print(f"🖥️  Using compute device: {settings.DEVICE}\n")
+    print(f"⚠️ Configuration warning:\n{e}")

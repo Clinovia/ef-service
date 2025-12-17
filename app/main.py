@@ -1,45 +1,65 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import os
+from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse  # <-- FIXED missing import
 
 from app.inference import initialize_model, run_inference, is_model_loaded
 from app.config import settings
 
+# Load environment variables
+load_dotenv()
 
 # -----------------------------
-# FastAPI Application Setup
+# FastAPI App
 # -----------------------------
 app = FastAPI(
     title=settings.SERVICE_NAME,
     description="Ejection fraction prediction from echocardiogram videos",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-# CORS settings — configure origins in production
+# -----------------------------
+# CORS
+# -----------------------------
+origins = [os.getenv("BACKEND_URL")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=origins if origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# -----------------------------
+# Token middleware (optional)
+# -----------------------------
+@app.middleware("http")
+async def verify_token(request: Request, call_next):
+    """Optional auth placeholder: skip auth for /health/docs."""
+    if request.url.path in ["/health", "/docs", "/openapi.json"]:
+        return await call_next(request)
+
+    auth = request.headers.get("authorization")
+    if not auth:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 # -----------------------------
-# Lifecycle Events
+# Startup & Shutdown Events
 # -----------------------------
 @app.on_event("startup")
 async def startup_event():
-    """Load EF model at startup."""
     print(f"🚀 Starting {settings.SERVICE_NAME}")
-    
-    # Check FFmpeg availability
+
     from app.preprocessing import check_ffmpeg_installed
+
     if not check_ffmpeg_installed():
-        print("⚠️  Warning: FFmpeg not found. Video format conversion will fail.")
-        print("   Install FFmpeg: https://ffmpeg.org/download.html")
+        print("⚠️  FFmpeg not found. Video conversion may fail.")
     else:
         print("✅ FFmpeg is available")
-    
+
     try:
         initialize_model()
         print("✅ EF model loaded — service ready")
@@ -47,19 +67,15 @@ async def startup_event():
         print(f"❌ Model load failure: {e}")
         raise
 
-
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown."""
     print(f"👋 Shutting down {settings.SERVICE_NAME}")
 
-
 # -----------------------------
-# API Endpoints
+# Endpoints
 # -----------------------------
 @app.get("/")
 def root():
-    """Root endpoint with service information."""
     return {
         "service": settings.SERVICE_NAME,
         "version": "1.0.0",
@@ -67,71 +83,46 @@ def root():
         "endpoints": {
             "health": "/health",
             "predict": "/predict-ef",
-            "docs": "/docs"
-        }
+            "docs": "/docs",
+        },
     }
-
 
 @app.get("/health")
 def health_check():
-    """
-    Health check endpoint for Railway / AWS / Kubernetes.
-    Returns service status and model readiness.
-    """
-    model_loaded = is_model_loaded()
-    
+    model_ready = is_model_loaded()
     return {
-        "status": "healthy" if model_loaded else "starting",
-        "model_loaded": model_loaded,
+        "status": "healthy" if model_ready else "starting",
+        "model_loaded": model_ready,
         "service": settings.SERVICE_NAME,
-        "device": str(settings.DEVICE)
+        "device": str(settings.DEVICE),
     }
 
-@app.post("/predict-ef")
+@app.post("/ejection-fraction", response_model=dict)
 async def predict_ef_endpoint(video: UploadFile = File(...)):
-    """
-    Upload an echocardiogram video and return EF prediction.
-    Schema fields returned:
-        - ef_percent
-        - category
-        - confidence
-        - model_name
-        - model_version
-    """
+    """Predict EF from uploaded video."""
     if not is_model_loaded():
-        raise HTTPException(
-            status_code=503,
-            detail="Service is starting. Model not ready yet."
-        )
+        raise HTTPException(status_code=503, detail="Model not ready yet.")
 
     allowed_types = [
         "video/x-msvideo",
         "video/avi",
         "video/mp4",
         "video/quicktime",
-        "video/x-matroska"
+        "video/x-matroska",
     ]
-
-    if video.content_type and video.content_type not in allowed_types:
+    if video.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type: {video.content_type}. "
-                   f"Allowed formats: .avi, .mp4, .mov"
+            detail=f"Unsupported file type: {video.content_type}. Allowed: .avi, .mp4, .mov",
         )
 
     try:
-        result = await run_inference(video)
-        return result
+        return await run_inference(video)
 
     except HTTPException:
         raise
-
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
     except Exception as e:
         print(f"❌ Prediction error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
